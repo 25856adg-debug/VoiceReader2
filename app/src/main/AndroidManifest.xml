@@ -15,7 +15,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="联网智能播报"
+        android:label="联网-播报"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="true">
 
