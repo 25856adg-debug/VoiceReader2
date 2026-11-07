@@ -21,6 +21,8 @@ public class MainActivity extends Activity {
     static final int PICK_TREE=101, PICK_FILE=102, REQ_NOTIFY=103;
     TextView status, selected, engineInfo;
     EditText interval, webUrl;
+    CheckBox monitorLocalBox, monitorWebBox;
+    String confirmedWebUrl="";
     Spinner voice, rate;
     Uri treeUri, fileUri;
     TextToSpeech tts;
@@ -34,7 +36,8 @@ public class MainActivity extends Activity {
         super.onCreate(b);
         treeUri=readUri("tree"); fileUri=readUri("file");
         buildUi(); refreshSelection();
-        webUrl.setText(getPreferences(0).getString("web_url",""));
+        confirmedWebUrl=getPreferences(0).getString("web_url","");
+        webUrl.setText(confirmedWebUrl);
         requestNotificationPermission(); initTTS();
     }
 
@@ -51,11 +54,17 @@ public class MainActivity extends Activity {
         addButton(root,"朗读最新文件最后一行",v->readLatest());
 
         TextView webLabel=new TextView(this);
-        webLabel.setText("\\n网页监控地址（纯文本直链或普通网页）"); root.addView(webLabel);
+        webLabel.setText("网页监控地址（纯文本直链或普通网页）"); root.addView(webLabel);
         webUrl=new EditText(this); webUrl.setSingleLine(true);
         webUrl.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
         webUrl.setHint("https://example.com/log.txt 或 https://example.com/page");
         root.addView(webUrl);
+        addButton(root,"确定 / 保存网页地址",v->confirmWebUrl());
+        TextView sourceLabel=new TextView(this); sourceLabel.setText("选择要监控的数据来源（可同时勾选）"); root.addView(sourceLabel);
+        monitorLocalBox=new CheckBox(this); monitorLocalBox.setText("监控本机文件夹最新 TXT / CSV / LOG");
+        monitorLocalBox.setChecked(treeUri!=null); root.addView(monitorLocalBox);
+        monitorWebBox=new CheckBox(this); monitorWebBox.setText("监控已确定的网页地址");
+        monitorWebBox.setChecked(!confirmedWebUrl.isEmpty()); root.addView(monitorWebBox);
 
         engineInfo=new TextView(this); engineInfo.setPadding(0,12,0,8);
         engineInfo.setText("语音引擎：正在检测"); root.addView(engineInfo);
@@ -83,8 +92,19 @@ public class MainActivity extends Activity {
         status.setPadding(0,18,0,0); root.addView(status);
 
         TextView note=new TextView(this);
-        note.setText("\\n说明：本机目录和网页地址可同时监控。网页支持 TXT/CSV/LOG 纯文本直链，以及可直接请求的静态 HTML 网页。需要登录、Cookie、验证码或 JavaScript 动态加载的页面暂不支持。后台运行时通知栏会显示监控状态。");
+        note.setText("说明：本机目录和网页地址可同时监控。网页支持 TXT/CSV/LOG 纯文本直链，以及可直接请求的静态 HTML 网页。需要登录、Cookie、验证码或 JavaScript 动态加载的页面暂不支持。后台运行时通知栏会显示监控状态。");
         root.addView(note); setContentView(scroll);
+    }
+
+    void confirmWebUrl() {
+        String url=webUrl.getText().toString().trim();
+        if(!url.isEmpty() && !(url.startsWith("http://")||url.startsWith("https://"))) {
+            status.setText("网址必须以 http:// 或 https:// 开头"); return;
+        }
+        confirmedWebUrl=url;
+        getPreferences(0).edit().putString("web_url",confirmedWebUrl).apply();
+        monitorWebBox.setChecked(!confirmedWebUrl.isEmpty());
+        status.setText(confirmedWebUrl.isEmpty()?"网页地址已清空":"网页地址已确定并保存："+confirmedWebUrl);
     }
 
     void addButton(LinearLayout root,String text,android.view.View.OnClickListener listener) {
@@ -186,13 +206,14 @@ public class MainActivity extends Activity {
             int f=data.getFlags()&(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             getContentResolver().takePersistableUriPermission(u,f);
         } catch(Exception ignored) {}
-        if(req==PICK_TREE) { treeUri=u; saveUri("tree",u); refreshSelection(); status.setText("监控文件夹授权成功"); }
+        if(req==PICK_TREE) { treeUri=u; saveUri("tree",u); if(monitorLocalBox!=null) monitorLocalBox.setChecked(true); refreshSelection(); status.setText("监控文件夹授权成功"); }
         else if(req==PICK_FILE) { fileUri=u; saveUri("file",u); refreshSelection(); status.setText("文件已选择"); }
     }
 
     void refreshSelection() {
         selected.setText("监控目录："+(treeUri==null?"未选择":treeDisplayName(treeUri))+
-            "\\n指定文件："+(fileUri==null?"未选择":displayName(fileUri)));
+            "
+指定文件："+(fileUri==null?"未选择":displayName(fileUri)));
     }
     String treeDisplayName(Uri tree) {
         try {
@@ -256,17 +277,18 @@ public class MainActivity extends Activity {
     }
 
     void startMonitor() {
-        String url=webUrl.getText().toString().trim();
-        if(treeUri==null && url.isEmpty()) { status.setText("请选择本机文件夹，或输入网页地址"); return; }
-        if(!url.isEmpty() && !(url.startsWith("http://")||url.startsWith("https://"))) {
-            status.setText("网址必须以 http:// 或 https:// 开头"); return;
-        }
-        getPreferences(0).edit().putString("web_url",url).apply();
+        boolean useLocal=monitorLocalBox.isChecked();
+        boolean useWeb=monitorWebBox.isChecked();
+        String url=confirmedWebUrl;
+        if(useLocal && treeUri==null) { status.setText("已勾选本机监控，但还没有选择文件夹"); return; }
+        if(useWeb && url.isEmpty()) { status.setText("请先输入网页地址并点击“确定 / 保存网页地址”"); return; }
+        if(!useLocal && !useWeb) { status.setText("请至少勾选一种监控来源"); return; }
         int sec=10; try { sec=Math.max(3,Integer.parseInt(interval.getText().toString().trim())); } catch(Exception ignored) {}
         int p=rate.getSelectedItemPosition(); if(p<0||p>=speedValues.length) p=2;
         Intent i=new Intent(this,ReaderService.class); i.setAction(ReaderService.START);
-        if(treeUri!=null) i.putExtra("tree",treeUri.toString());
-        i.putExtra("url",url); i.putExtra("interval",sec); i.putExtra("speed",speedValues[p]);
+        if(useLocal && treeUri!=null) i.putExtra("tree",treeUri.toString());
+        i.putExtra("monitor_local",useLocal); i.putExtra("monitor_web",useWeb);
+        i.putExtra("url",useWeb?url:""); i.putExtra("interval",sec); i.putExtra("speed",speedValues[p]);
         if(Build.VERSION.SDK_INT>=26) startForegroundService(i); else startService(i);
         status.setText("后台监控已启动："+sec+"秒");
     }
@@ -284,6 +306,5 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 }
-
 
 
