@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch:
+  workflow_dispatch: # 允许手动点击按钮触发
 
 jobs:
   build:
@@ -21,6 +21,7 @@ jobs:
         distribution: 'temurin'
         cache: gradle
         
+    # 注意：这里去掉了 chmod +x gradlew，直接用系统自带的 gradle 命令
     - name: Build with Gradle
       run: gradle assembleDebug -x lint
 
@@ -29,5 +30,4 @@ jobs:
       with:
         name: app-debug
         path: app/build/outputs/apk/debug/*.apk
-
         
