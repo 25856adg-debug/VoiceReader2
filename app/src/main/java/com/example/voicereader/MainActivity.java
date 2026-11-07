@@ -89,7 +89,7 @@ public class MainActivity extends Activity {
         serverUrl.setText(
                 prefs.getString(
                         "server_url",
-                        "http://170.106.188.189:6363"
+                        "地址:xxx"
                 )
         );
 
