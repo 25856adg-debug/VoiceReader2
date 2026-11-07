@@ -24,6 +24,7 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
     private TextToSpeech tts;
     private Uri tree;
     private String webUrl="";
+    private boolean monitorLocal=true, monitorWeb=false;
     private int interval=10;
     private float speed=1f;
     private volatile boolean running=false, paused=false, ready=false;
@@ -49,6 +50,8 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
         String a=i.getAction();
         if(START.equals(a)) {
             String raw=i.getStringExtra("tree"); tree=raw==null?null:Uri.parse(raw);
+            monitorLocal=i.getBooleanExtra("monitor_local",raw!=null);
+            monitorWeb=i.getBooleanExtra("monitor_web",i.getStringExtra("url")!=null && !i.getStringExtra("url").isEmpty());
             webUrl=i.getStringExtra("url"); if(webUrl==null) webUrl="";
             interval=Math.max(3,i.getIntExtra("interval",10));
             speed=i.getFloatExtra("speed",1f);
@@ -73,13 +76,13 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
         if(!running || paused || worker==null) return;
         worker.execute(() -> {
             if(!running || paused) return;
-            if(tree!=null) {
+            if(monitorLocal && tree!=null) {
                 try {
                     String[] item=getNewestLocalLine();
                     if(item!=null) speakIfChanged("local:"+item[0],item[1]);
                 } catch(Exception e) { update("本机目录读取失败："+err(e)); }
             }
-            if(!webUrl.isEmpty() && running && !paused) {
+            if(monitorWeb && !webUrl.isEmpty() && running && !paused) {
                 try {
                     String line=fetchWebLastLine(webUrl);
                     if(line!=null && !line.trim().isEmpty()) speakIfChanged("web:"+webUrl,line.trim());
@@ -177,7 +180,7 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
     private String lastNonEmptyLine(String text) {
         if(text==null) return "";
         String last="";
-        for(String line:text.split("\\\\R")) if(!line.trim().isEmpty()) last=line.trim();
+        for(String line:text.split("\\R")) if(!line.trim().isEmpty()) last=line.trim();
         return last;
     }
 
@@ -254,4 +257,6 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
     }
     @Override public IBinder onBind(Intent i) { return null; }
 }
+
+
 
