@@ -1,33 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 1. 必须开启联网权限 -->
+    <!-- 1. 联网权限 -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- 允许检查网络状态 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- 2. 上传/下载需要的存储权限 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
     <application
         android:allowBackup="true"
-        android:label="谱子"
+        android:icon="@mipmap/ic_launcher"
+        android:label="文件智能朗读器"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
-        android:usesCleartextTraffic="true"> 
-        <!-- 注意：上面的 theme 改成了 NoActionBar，去掉原生丑陋的标题栏，让网页全屏 -->
-        <!-- usesCleartextTraffic="true" 是为了防止有些 http 链接被拦截，有备无患 -->
+        android:usesCleartextTraffic="true">
 
+        <!-- 3. 你的主 Activity 配置 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode"
             android:screenOrientation="portrait">
-            <!-- configChanges 防止手机横竖屏切换时，网页重新加载白屏 -->
-            <!-- screenOrientation="portrait" 强制竖屏，如果你需要横屏可以把这行删掉 -->
             
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        
     </application>
 
 </manifest>
+
+
+
