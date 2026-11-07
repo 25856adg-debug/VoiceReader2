@@ -264,9 +264,9 @@ public class MainActivity extends Activity {
     }
 
     void refreshSelection() {
-        selected.setText("监控目录："+(treeUri==null?"未选择":treeDisplayName(treeUri))+
-            "
-指定文件："+(fileUri==null?"未选择":displayName(fileUri)));
+    // 注意：冒号是英文的":"，换行使用了"\n"
+       selected.setText("监控目录:" + (treeUri == null ? "未选择" : treeDisplayName(treeUri)) + 
+            "\n指定文件:" + (fileUri == null ? "未选择" : displayName(fileUri)));
     }
     String treeDisplayName(Uri tree) {
         try {
