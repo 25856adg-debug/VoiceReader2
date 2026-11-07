@@ -1,30 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 1. 必须开启联网权限 -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <queries>
-        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
-    </queries>
+    <!-- 允许检查网络状态 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
         android:label="文件智能朗读器"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:usesCleartextTraffic="true">
-        <activity android:name=".MainActivity" android:exported="true">
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+        android:usesCleartextTraffic="true"> 
+        <!-- 注意：上面的 theme 改成了 NoActionBar，去掉原生丑陋的标题栏，让网页全屏 -->
+        <!-- usesCleartextTraffic="true" 是为了防止有些 http 链接被拦截，有备无患 -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode"
+            android:screenOrientation="portrait">
+            <!-- configChanges 防止手机横竖屏切换时，网页重新加载白屏 -->
+            <!-- screenOrientation="portrait" 强制竖屏，如果你需要横屏可以把这行删掉 -->
+            
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service
-            android:name=".ReaderService"
-            android:exported="false"
-            android:stopWithTask="false"
-            android:foregroundServiceType="mediaPlayback" />
     </application>
+
 </manifest>
-
-
-
