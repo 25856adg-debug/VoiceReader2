@@ -9,6 +9,7 @@ import android.media.AudioFormat;
 import android.media.AudioTrack;
 import android.provider.DocumentsContract;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.Voice;
 import android.database.Cursor;
 import android.text.Html;
 import android.text.Spanned;
@@ -30,6 +31,8 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
     private int interval=10;
     private float speed=1f;
     private float gain=2.0f;
+    private boolean networkVoiceMode=false;
+    private Voice selectedNetworkVoice=null;
     private final Object pcmLock=new Object();
     private String pcmUtteranceId="";
     private ByteArrayOutputStream pcmBuffer=new ByteArrayOutputStream();
@@ -63,6 +66,7 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
             interval=Math.max(3,i.getIntExtra("interval",10));
             speed=i.getFloatExtra("speed",1f);
             gain=Math.max(0.5f,Math.min(3.0f,i.getFloatExtra("gain",2.0f)));
+            networkVoiceMode=i.getBooleanExtra("network_voice",false);
             running=true; paused=false;
             startForeground(NOTIFY,notification("正在启动监控"));
             try { if(wakeLock!=null && !wakeLock.isHeld()) wakeLock.acquire(); } catch(Exception ignored) {}
@@ -197,6 +201,12 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
         if(line.equals(lastSpoken.get(source))) return;
         try {
             tts.setLanguage(Locale.forLanguageTag("zh-CN"));
+            if(networkVoiceMode) {
+                if(selectedNetworkVoice==null) selectedNetworkVoice=findBestNetworkChineseVoice();
+                if(selectedNetworkVoice==null) { update("联网模式已开启，但没有可用的联网中文语音包"); return; }
+                int vr=tts.setVoice(selectedNetworkVoice);
+                if(vr!=TextToSpeech.SUCCESS) { update("联网语音切换失败："+vr); return; }
+            }
             tts.setSpeechRate(speed);
             String utteranceId="amp_"+System.currentTimeMillis();
             synchronized(pcmLock) { pcmUtteranceId=utteranceId; pcmBuffer=new ByteArrayOutputStream(); }
@@ -216,6 +226,14 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
             tts.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
             tts.setLanguage(Locale.forLanguageTag("zh-CN"));
+            if(networkVoiceMode) {
+                selectedNetworkVoice=findBestNetworkChineseVoice();
+                if(selectedNetworkVoice==null) update("没有找到联网中文语音包，请到系统 TTS 设置下载/启用联网语音");
+                else {
+                    int vr=tts.setVoice(selectedNetworkVoice);
+                    update(vr==TextToSpeech.SUCCESS?"联网语音已启用："+selectedNetworkVoice.getName():"联网语音设置失败："+vr);
+                }
+            }
             tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
                 @Override public void onStart(String id) { update("正在合成增强语音"); }
                 @Override public void onBeginSynthesis(String id,int sampleRate,int audioFormat,int channelCount) {
@@ -249,6 +267,21 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
         } catch(Exception e) { update("后台 TTS 配置失败："+err(e)); }
     }
 
+
+    private Voice findBestNetworkChineseVoice() {
+        if(Build.VERSION.SDK_INT<21 || tts==null) return null;
+        try {
+            Set<Voice> all=tts.getVoices();
+            Voice best=null;
+            if(all!=null) for(Voice v:all) {
+                Locale l=v.getLocale();
+                if(l!=null && "zh".equalsIgnoreCase(l.getLanguage()) && v.isNetworkConnectionRequired()) {
+                    if(best==null || v.getQuality()>best.getQuality()) best=v;
+                }
+            }
+            return best;
+        } catch(Exception e) { return null; }
+    }
 
     // 对 TTS 输出的 PCM 做软件增益和软限幅，再直接送入 AudioTrack。
     private void playAmplifiedPcm(byte[] input,int sampleRate,int encoding,int channels) throws Exception {
@@ -311,7 +344,7 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
         Intent p=new Intent(this,ReaderService.class); p.setAction(PAUSE);
         PendingIntent pi=PendingIntent.getService(this,1,p,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
-        return b.setContentTitle("智能播报").setContentText(msg)
+        return b.setContentTitle("文件智能朗读器").setContentText(msg)
                 .setSmallIcon(android.R.drawable.ic_media_play)
                 .addAction(new Notification.Action.Builder(android.R.drawable.ic_media_pause,"暂停",pi).build())
                 .setOngoing(true).build();
@@ -334,7 +367,6 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
         super.onDestroy();
     }
     @Override public IBinder onBind(Intent i) { return null; }
-            }
-
+}
 
 
