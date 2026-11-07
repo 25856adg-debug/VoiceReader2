@@ -5,6 +5,8 @@ import android.content.*;
 import android.net.Uri;
 import android.os.*;
 import android.media.AudioAttributes;
+import android.media.AudioFormat;
+import android.media.AudioTrack;
 import android.provider.DocumentsContract;
 import android.speech.tts.TextToSpeech;
 import android.database.Cursor;
@@ -27,6 +29,11 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
     private boolean monitorLocal=true, monitorWeb=false;
     private int interval=10;
     private float speed=1f;
+    private float gain=2.0f;
+    private final Object pcmLock=new Object();
+    private String pcmUtteranceId="";
+    private ByteArrayOutputStream pcmBuffer=new ByteArrayOutputStream();
+    private int pcmSampleRate=24000, pcmEncoding=AudioFormat.ENCODING_PCM_16BIT, pcmChannels=1;
     private volatile boolean running=false, paused=false, ready=false;
     private ScheduledExecutorService scheduler;
     private ExecutorService worker;
@@ -55,6 +62,7 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
             webUrl=i.getStringExtra("url"); if(webUrl==null) webUrl="";
             interval=Math.max(3,i.getIntExtra("interval",10));
             speed=i.getFloatExtra("speed",1f);
+            gain=Math.max(0.5f,Math.min(3.0f,i.getFloatExtra("gain",2.0f)));
             running=true; paused=false;
             startForeground(NOTIFY,notification("正在启动监控"));
             try { if(wakeLock!=null && !wakeLock.isHeld()) wakeLock.acquire(); } catch(Exception ignored) {}
@@ -190,9 +198,14 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
         try {
             tts.setLanguage(Locale.forLanguageTag("zh-CN"));
             tts.setSpeechRate(speed);
-            int result=tts.speak(line,TextToSpeech.QUEUE_ADD,null,"auto_"+System.currentTimeMillis());
+            String utteranceId="amp_"+System.currentTimeMillis();
+            synchronized(pcmLock) { pcmUtteranceId=utteranceId; pcmBuffer=new ByteArrayOutputStream(); }
+            Bundle silentParams=new Bundle();
+            // 先静音系统 TTS 自带输出，只播放后面经过增益处理的 PCM，避免原声和增强声重叠。
+            silentParams.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME,0.0f);
+            int result=tts.speak(line,TextToSpeech.QUEUE_FLUSH,silentParams,utteranceId);
             if(result==TextToSpeech.ERROR) update("TTS 调用失败");
-            else { lastSpoken.put(source,line); update("发现新内容："+line); }
+            else { lastSpoken.put(source,line); update("发现新内容，音频增强 "+Math.round(gain*100)+"%"); }
         } catch(Exception e) { update("TTS 异常："+err(e)); }
     }
 
@@ -204,13 +217,78 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
             tts.setLanguage(Locale.forLanguageTag("zh-CN"));
             tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
-                @Override public void onStart(String id) { update("正在朗读"); }
-                @Override public void onDone(String id) { update("朗读完成"); }
-                @Override public void onError(String id) { update("后台 TTS 播放失败"); }
-                @Override public void onError(String id,int code) { update("后台 TTS 错误："+code); }
+                @Override public void onStart(String id) { update("正在合成增强语音"); }
+                @Override public void onBeginSynthesis(String id,int sampleRate,int audioFormat,int channelCount) {
+                    synchronized(pcmLock) {
+                        pcmUtteranceId=id; pcmBuffer=new ByteArrayOutputStream();
+                        pcmSampleRate=sampleRate; pcmEncoding=audioFormat; pcmChannels=channelCount;
+                    }
+                }
+                @Override public void onAudioAvailable(String id,byte[] audio) {
+                    synchronized(pcmLock) {
+                        if(id.equals(pcmUtteranceId) && pcmBuffer!=null) {
+                            try { pcmBuffer.write(audio); } catch(IOException ignored) {}
+                        }
+                    }
+                }
+                @Override public void onDone(String id) {
+                    final byte[] data; final int sr,enc,ch;
+                    synchronized(pcmLock) {
+                        if(!id.equals(pcmUtteranceId)) return;
+                        data=pcmBuffer.toByteArray(); sr=pcmSampleRate; enc=pcmEncoding; ch=pcmChannels;
+                        pcmBuffer=new ByteArrayOutputStream();
+                    }
+                    if(data.length==0) { update("语音引擎没有提供可增强的 PCM 音频"); return; }
+                    try { playAmplifiedPcm(data,sr,enc,ch); update("增强朗读完成"); }
+                    catch(Exception e) { update("增强播放失败："+err(e)); }
+                }
+                @Override public void onError(String id) { update("后台 TTS 合成失败"); }
+                @Override public void onError(String id,int code) { update("后台 TTS 合成错误："+code); }
             });
             update("后台语音已就绪");
         } catch(Exception e) { update("后台 TTS 配置失败："+err(e)); }
+    }
+
+
+    // 对 TTS 输出的 PCM 做软件增益和软限幅，再直接送入 AudioTrack。
+    private void playAmplifiedPcm(byte[] input,int sampleRate,int encoding,int channels) throws Exception {
+        if(Build.VERSION.SDK_INT<24) throw new IOException("当前 Android 版本不支持 TTS PCM 回调");
+        int mask=channels==1?AudioFormat.CHANNEL_OUT_MONO:AudioFormat.CHANNEL_OUT_STEREO;
+        byte[] pcm=input.clone();
+        float g=gain;
+        if(encoding==AudioFormat.ENCODING_PCM_16BIT) {
+            java.nio.ByteBuffer b=java.nio.ByteBuffer.wrap(pcm).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            while(b.remaining()>=2) {
+                short v=b.getShort(); double x=v/32768.0;
+                double y=Math.tanh(x*g);
+                int out=(int)Math.round(y*32767.0);
+                if(out>32767) out=32767; if(out<-32768) out=-32768;
+                b.position(b.position()-2); b.putShort((short)out);
+            }
+        } else if(encoding==AudioFormat.ENCODING_PCM_FLOAT) {
+            java.nio.ByteBuffer b=java.nio.ByteBuffer.wrap(pcm).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            while(b.remaining()>=4) {
+                float x=b.getFloat(); float y=(float)Math.tanh(x*g);
+                b.position(b.position()-4); b.putFloat(y);
+            }
+        } else {
+            throw new IOException("语音引擎输出格式暂不支持增益："+encoding);
+        }
+        AudioFormat format=new AudioFormat.Builder().setEncoding(encoding).setSampleRate(sampleRate).setChannelMask(mask).build();
+        AudioAttributes attrs=new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
+        int min=AudioTrack.getMinBufferSize(sampleRate,mask,encoding);
+        int size=Math.max(Math.max(min,pcm.length),4096);
+        AudioTrack track=new AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(format)
+                .setBufferSizeInBytes(size).setTransferMode(AudioTrack.MODE_STATIC).build();
+        try {
+            int written=track.write(pcm,0,pcm.length);
+            if(written<0) throw new IOException("AudioTrack 写入失败："+written);
+            track.play();
+            long frames=pcm.length/(channels*(encoding==AudioFormat.ENCODING_PCM_FLOAT?4:2));
+            long deadline=System.currentTimeMillis()+Math.max(5000,frames*1000L/sampleRate+5000);
+            while(track.getPlaybackHeadPosition()<frames && System.currentTimeMillis()<deadline) Thread.sleep(30);
+        } finally { try { track.stop(); } catch(Exception ignored) {} track.release(); }
     }
 
     private String err(Exception e) { return e.getMessage()==null?e.getClass().getSimpleName():e.getMessage(); }
@@ -233,7 +311,7 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
         Intent p=new Intent(this,ReaderService.class); p.setAction(PAUSE);
         PendingIntent pi=PendingIntent.getService(this,1,p,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
-        return b.setContentTitle("文件智能朗读器").setContentText(msg)
+        return b.setContentTitle("智能播报").setContentText(msg)
                 .setSmallIcon(android.R.drawable.ic_media_play)
                 .addAction(new Notification.Action.Builder(android.R.drawable.ic_media_pause,"暂停",pi).build())
                 .setOngoing(true).build();
@@ -256,7 +334,7 @@ public class ReaderService extends Service implements TextToSpeech.OnInitListene
         super.onDestroy();
     }
     @Override public IBinder onBind(Intent i) { return null; }
-}
+            }
 
 
 
