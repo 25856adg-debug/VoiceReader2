@@ -5,11 +5,10 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch: # 【新增】允许你在 Actions 页面手动点击按钮触发打包
+  workflow_dispatch:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
@@ -22,16 +21,13 @@ jobs:
         distribution: 'temurin'
         cache: gradle
         
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew # 【新增】赋予执行权限，必须加
-      
     - name: Build with Gradle
-      run: ./gradlew assembleDebug -x lint # 【修改】用 ./gradlew，并且只打 Debug 包，跳过耗时的 lint 检查
+      run: gradle assembleDebug -x lint
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: app-debug # 【修改】产物名字改成 debug
-        path: app/build/outputs/apk/debug/*.apk # 【修改】对应 debug 包的路径
+        name: app-debug
+        path: app/build/outputs/apk/debug/*.apk
 
         
