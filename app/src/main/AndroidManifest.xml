@@ -14,9 +14,7 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="文件智能朗读器"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="阅读器"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:usesCleartextTraffic="true">
