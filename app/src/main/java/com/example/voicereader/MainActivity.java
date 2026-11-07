@@ -24,6 +24,8 @@ public class MainActivity extends Activity {
     CheckBox monitorLocalBox, monitorWebBox;
     String confirmedWebUrl="";
     Spinner voice, rate;
+    SeekBar gainBar;
+    TextView gainLabel;
     Uri treeUri, fileUri;
     TextToSpeech tts;
     boolean ttsReady=false;
@@ -79,6 +81,18 @@ public class MainActivity extends Activity {
         rate=new Spinner(this);
         rate.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,rates));
         rate.setSelection(2); root.addView(rate);
+
+        TextView gainTitle=new TextView(this); gainTitle.setText("朗读增强音量（50%～300%，默认200%）"); root.addView(gainTitle);
+        gainLabel=new TextView(this); root.addView(gainLabel);
+        gainBar=new SeekBar(this); gainBar.setMax(250); gainBar.setProgress(150); root.addView(gainBar);
+        gainLabel.setText("软件增益：200%");
+        gainBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar,int progress,boolean fromUser) {
+                gainLabel.setText("软件增益："+(50+progress)+"%"+(50+progress>=250?"（高增益可能失真）":""));
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
 
         TextView l3=new TextView(this); l3.setText("自动检查间隔（秒）"); root.addView(l3);
         interval=new EditText(this); interval.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
@@ -211,8 +225,9 @@ public class MainActivity extends Activity {
     }
 
     void refreshSelection() {
-    selected.setText("监控目录：" + (treeUri == null ? "未选择" : treeDisplayName(treeUri)) +
-            "\n指定文件：" + (fileUri == null ? "未选择" : displayName(fileUri)));
+        selected.setText("监控目录："+(treeUri==null?"未选择":treeDisplayName(treeUri))+
+            "
+指定文件："+(fileUri==null?"未选择":displayName(fileUri)));
     }
     String treeDisplayName(Uri tree) {
         try {
@@ -288,6 +303,7 @@ public class MainActivity extends Activity {
         if(useLocal && treeUri!=null) i.putExtra("tree",treeUri.toString());
         i.putExtra("monitor_local",useLocal); i.putExtra("monitor_web",useWeb);
         i.putExtra("url",useWeb?url:""); i.putExtra("interval",sec); i.putExtra("speed",speedValues[p]);
+        i.putExtra("gain",(50+gainBar.getProgress())/100f);
         if(Build.VERSION.SDK_INT>=26) startForegroundService(i); else startService(i);
         status.setText("后台监控已启动："+sec+"秒");
     }
@@ -305,5 +321,4 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 }
-
 
