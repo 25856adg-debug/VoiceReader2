@@ -7,10 +7,10 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.example.voicereader.ofoa'
+        applicationId 'com.example.voicereader.dg'
         minSdk 23
         targetSdk 35
         versionCode 1
-        versionName '8.2.3'
+        versionName '2.2.2'
     }
 }
