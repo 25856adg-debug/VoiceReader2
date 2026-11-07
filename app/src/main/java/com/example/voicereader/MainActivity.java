@@ -21,7 +21,7 @@ public class MainActivity extends Activity {
     static final int PICK_TREE=101, PICK_FILE=102, REQ_NOTIFY=103;
     TextView status, selected, engineInfo;
     EditText interval, webUrl;
-    CheckBox monitorLocalBox, monitorWebBox;
+    CheckBox monitorLocalBox, monitorWebBox, networkVoiceBox;
     String confirmedWebUrl="";
     Spinner voice, rate;
     SeekBar gainBar;
@@ -70,6 +70,14 @@ public class MainActivity extends Activity {
 
         engineInfo=new TextView(this); engineInfo.setPadding(0,12,0,8);
         engineInfo.setText("语音引擎：正在检测"); root.addView(engineInfo);
+        networkVoiceBox=new CheckBox(this);
+        networkVoiceBox.setText("联网语音模式（优先选择需要网络的中文语音包）");
+        networkVoiceBox.setChecked(getPreferences(0).getBoolean("network_voice",false));
+        networkVoiceBox.setOnCheckedChangeListener((button,checked)->{
+            getPreferences(0).edit().putBoolean("network_voice",checked).apply();
+            if(ttsReady) applyNetworkVoice();
+        });
+        root.addView(networkVoiceBox);
         addButton(root,"测试中文语音",v->testSpeech());
 
         TextView l1=new TextView(this); l1.setText("本机语音音色"); root.addView(l1);
@@ -141,6 +149,7 @@ public class MainActivity extends Activity {
                 String engine=tts.getDefaultEngine();
                 engineInfo.setText("语音引擎："+(engine==null?"系统默认引擎":engine));
                 loadChineseVoices();
+                if(networkVoiceBox.isChecked()) applyNetworkVoice();
                 status.setText((lang==TextToSpeech.LANG_MISSING_DATA || lang==TextToSpeech.LANG_NOT_SUPPORTED)
                     ?"中文语音数据不可用，请检查系统TTS":"中文语音已就绪");
                 tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
@@ -160,7 +169,8 @@ public class MainActivity extends Activity {
             if(all!=null) for(Voice v:all) {
                 Locale l=v.getLocale();
                 if(l!=null && "zh".equalsIgnoreCase(l.getLanguage())) {
-                    availableVoices.add(v); voiceLabels.add(l.getDisplayName()+" · "+v.getName());
+                    availableVoices.add(v);
+                    voiceLabels.add((v.isNetworkConnectionRequired()?"[联网] ":"[离线] ")+l.getDisplayName()+" · "+v.getName());
                 }
             }
         } catch(Exception ignored) {}
@@ -169,11 +179,39 @@ public class MainActivity extends Activity {
 
     void applySelectedVoice() {
         if(tts==null) return;
+        if(networkVoiceBox!=null && networkVoiceBox.isChecked()) { applyNetworkVoice(); return; }
         int p=voice.getSelectedItemPosition();
         try {
             if(p>0 && p-1<availableVoices.size()) tts.setVoice(availableVoices.get(p-1));
             else tts.setLanguage(Locale.forLanguageTag("zh-CN"));
         } catch(Exception ignored) {}
+    }
+
+    boolean applyNetworkVoice() {
+        if(tts==null || Build.VERSION.SDK_INT<21) {
+            if(status!=null) status.setText("当前系统不支持联网语音选择");
+            return false;
+        }
+        try {
+            Voice best=null;
+            Set<Voice> all=tts.getVoices();
+            if(all!=null) for(Voice v:all) {
+                Locale l=v.getLocale();
+                if(l!=null && "zh".equalsIgnoreCase(l.getLanguage()) && v.isNetworkConnectionRequired()) {
+                    if(best==null || v.getQuality()>best.getQuality()) best=v;
+                }
+            }
+            if(best==null) {
+                if(status!=null) status.setText("没有找到联网中文语音包。请先在系统 TTS 设置中下载/启用联网中文语音");
+                return false;
+            }
+            int r=tts.setVoice(best);
+            if(status!=null) status.setText(r==TextToSpeech.SUCCESS?"已选择联网语音："+best.getName():"联网语音选择失败："+r);
+            return r==TextToSpeech.SUCCESS;
+        } catch(Exception e) {
+            if(status!=null) status.setText("联网语音选择异常："+e.getMessage());
+            return false;
+        }
     }
 
     void testSpeech() {
@@ -184,6 +222,7 @@ public class MainActivity extends Activity {
             if(lang==TextToSpeech.LANG_MISSING_DATA || lang==TextToSpeech.LANG_NOT_SUPPORTED) {
                 status.setText("中文语音不可用，请在系统TTS设置中安装中文语音数据"); return;
             }
+            if(networkVoiceBox.isChecked() && !applyNetworkVoice()) return;
             tts.setSpeechRate(1f);
             int r=tts.speak("你好，现在正在测试中文语音，一二三四五。",TextToSpeech.QUEUE_FLUSH,null,"test_"+System.currentTimeMillis());
             status.setText(r==TextToSpeech.ERROR?"中文语音提交失败":"已提交测试，请听声音");
@@ -223,10 +262,11 @@ public class MainActivity extends Activity {
         if(req==PICK_TREE) { treeUri=u; saveUri("tree",u); if(monitorLocalBox!=null) monitorLocalBox.setChecked(true); refreshSelection(); status.setText("监控文件夹授权成功"); }
         else if(req==PICK_FILE) { fileUri=u; saveUri("file",u); refreshSelection(); status.setText("文件已选择"); }
     }
+
     void refreshSelection() {
-    // 注意：冒号是英文的":"，换行使用了"\n"
-        selected.setText("监控目录:" + (treeUri == null ? "未选择" : treeDisplayName(treeUri)) + 
-            "\n指定文件:" + (fileUri == null ? "未选择" : displayName(fileUri)));
+        selected.setText("监控目录："+(treeUri==null?"未选择":treeDisplayName(treeUri))+
+            "
+指定文件："+(fileUri==null?"未选择":displayName(fileUri)));
     }
     String treeDisplayName(Uri tree) {
         try {
@@ -303,6 +343,7 @@ public class MainActivity extends Activity {
         i.putExtra("monitor_local",useLocal); i.putExtra("monitor_web",useWeb);
         i.putExtra("url",useWeb?url:""); i.putExtra("interval",sec); i.putExtra("speed",speedValues[p]);
         i.putExtra("gain",(50+gainBar.getProgress())/100f);
+        i.putExtra("network_voice",networkVoiceBox.isChecked());
         if(Build.VERSION.SDK_INT>=26) startForegroundService(i); else startService(i);
         status.setText("后台监控已启动："+sec+"秒");
     }
